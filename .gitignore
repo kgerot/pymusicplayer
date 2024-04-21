@@ -1,4 +1,19 @@
 venv/
 venv/*
 __pycache__
-data/preferences.json
+
+example.*
+
+# exclude generated album covers
+assets/img/albums/*.jpg
+
+# exclude non-essential icons
+assets/img/*.png
+!assets/img/play_[gb].png
+!assets/img/pause_[gb].png
+!assets/img/next_[gb].png
+!assets/img/prev_[gb].png
+!assets/img/vol_[gb].png
+
+# exclude light mode for now
+assets/forest-light*

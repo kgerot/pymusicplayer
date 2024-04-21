@@ -1,26 +1,14 @@
+"""
+main data processing module (TODO)
+"""
 import json, mutagen, os
 import pathlib as pl
 import mutagen.id3
 import pandas as pd
-import warnings
+import warnings, log
 
-class pcol:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
-def fmt(message, category, filename, lineno, line=''):
-        return pcol.WARNING+"{0} ({1}): {2}\n".format(category.__name__, lineno, message)+pcol.ENDC
-warnings.formatwarning = fmt
-def warning(message, category=Warning):
-    warnings.warn(message, category=category, stacklevel=2)
-
+def setup():
+    lib = Library()
 
 class ID3Tag:
     def __init__(self, id:str, supported:bool = True, val_dict:dict[str,] = {}, depth:int = 0):
@@ -51,7 +39,7 @@ class ID3Tag:
                 self.copy_id:str = val_dict.get('copyOf')
                 self.copy_d:int = val_dict.get('copyDepth')
                 if self.copy_id == None or self.copy_d == None:
-                    warning(f"[{self.id}] Can't copy {self.copy_id} at depth {self.copy_d}")
+                    log.warning(f"[{self.id}] Can't copy {self.copy_id} at depth {self.copy_d}")
                     self.supported = False
                     return None
             case "struct":
@@ -59,11 +47,11 @@ class ID3Tag:
                 sub_dict = val_dict.get('subtags')
                 if sub_dict: self.subtags = ID3TagList(sub_dict, depth = self.depth+1)
                 else: 
-                    warning(f"[{self.id}] Type is 'struct', but no subtags are provided")
+                    log.warning(f"[{self.id}] Type is 'struct', but no subtags are provided")
                     self.supported = False
                     return None
             case _:
-                warning(f"[{self.id}] Type {self.tag_type} is unrecognized")
+                log.warning(f"[{self.id}] Type {self.tag_type} is unrecognized")
                 self.supported = False
                 return None
     
@@ -84,7 +72,7 @@ class ID3Tag:
                 case "map": return meta.getall(self.id)[0].text[0] # TODO: map values
                 case "struct": return meta.getall(self.id)[0] # TODO: implement struct
         except:
-            warning(f"Couldn't extract values for {self.id}")
+            log.warning(f"Couldn't extract values for {self.id}")
             return None
 
 class ID3TagList:
@@ -184,7 +172,7 @@ class Track:
         for key in self.metadata.tags.keys():
             if key in ['TIT2', 'TPE1', 'TPE2', 'TALB', 'TRCK']: continue
             tag = ref.get_tag_by_id(key)
-            if not tag: warning(f"[{self.title}] Can't find tag {key}"); continue
+            if not tag: log.warning(f"[{self.title}] Can't find tag {key}"); continue
             try: known_dict.update({tag.name:tag.get_value(self.metadata.tags)})
             except: continue
         return(known_dict)
@@ -229,8 +217,6 @@ def make_id3_tags(directory:str = "./data/reference.json") -> ID3TagList:
         if tag.tag_type == "copy":
             copy_tag = tag_list.get_tag_by_id(tag.copy_id, depth=tag.copy_d)
             if copy_tag: tag = copy_tags(tag, copy_tag)
-            else:  warning(f"{tag.id} is a copy of {tag.copy_id}, but {tag.copy_id} doesn't exist at depth ({tag.copy_d})")
+            else:  log.warning(f"{tag.id} is a copy of {tag.copy_id}, but {tag.copy_id} doesn't exist at depth ({tag.copy_d})")
     
     return tag_list
-    
-lib = Library()

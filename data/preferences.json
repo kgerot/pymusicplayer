@@ -1,0 +1,5 @@
+{
+    "music_directories": ["~/Music"],
+    "extensions": [".mp3", ".mp4", ".wav"],
+    "theme": "forest-dark"
+}
