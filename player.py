@@ -2,11 +2,18 @@ from tkinter import ttk
 import tkinter as tk
 import pandas as pd
 import pathlib as pl
-import vlc, os, time
 from PIL import Image
 from PIL import ImageTk as itk
-import base64, pickle, threading
-import data_easy as data
+import winsdk.windows.media
+import winsdk.windows.media.control
+import winsdk.windows.media.playback
+import data_processing as data
+from dataclasses import dataclass
+from collections import namedtuple
+
+import vlc, os, time, ctypes, winsdk, asyncio, log
+
+import winsdk.windows
 
 ## TODO: Load album images during launch if launch gets too slow
 ## TODO: Add preferences editing
@@ -18,49 +25,115 @@ import data_easy as data
 ## TODO: failsafe music playing without VLC
 ## TODO: make prev button skip to beginning of current song and then go to previous song
 
+
+@dataclass
+class Status:
+    stopped: bool = True
+    playing: bool = False
+    seeking: bool = False
+
+@dataclass
+class Sizes:
+    m: int = 75
+    s: int = 30
+    xs: int = 20
+
+@dataclass
+class Icons:
+    play: itk.PhotoImage = None
+    pause: itk.PhotoImage = None
+    next: itk.PhotoImage = None
+    prev: itk.PhotoImage = None
+    vol: itk.PhotoImage = None
+
+class WinMedia:
+    def __init__(self) -> None:
+        self.media_player = winsdk.windows.media.playback.MediaPlayer()
+        self.events = self.media_player.command_manager
+
+        # self.controls = winsdk.windows.media.SystemMediaTransportControls
+        self.manager = winsdk.windows.media.control.GlobalSystemMediaTransportControlsSessionManager
+        # self.display_updater = winsdk.windows.media.SystemMediaTransportControlsDisplayUpdater
+        # self.display_properties = winsdk.windows.media.MusicDisplayProperties
+    async def get_media_info(self):
+        sessions = await self.manager.request_async()
+        current_session = sessions.get_current_session()
+        if current_session:
+            info = await current_session.try_get_media_properties_async()
+            info_dict = {song_attr: info.__getattribute__(song_attr) for song_attr in dir(info) if song_attr[0] != '_'}
+            info_dict['genres'] = list(info_dict['genres'])
+            return info_dict
+        return None
+
+    def setup(self, record):
+
+    def update(self, title, albumartist):
+        try:
+            print(0)
+            self.media_item = winsdk.windows.media.playback.MediaPlaybackItem(None, 0)
+            print(1)
+            self.props = self.media_item.get_display_properties()
+            print(2)
+            self.props.type = winsdk.windows.media.MediaPlaybackType.MUSIC
+            print(3)
+            self.props.music_properties.title = "test"
+            print(4)
+            self.props.music_properties.album_artist = "test"
+            print(5)
+            self.media_item.apply_display_properties(self.props)
+            print(6)
+        except Exception as e:
+            log.warning(e)
+
 class MusicPlayer:
     def __init__(self, root: tk.Tk, lib: data.Library):
-        self.stopped = True
-        self.playing = False
-        self.tick_len = 300
-        self.seek_lag = 0
-        self.seeking = False
-        self.track_len = 0
+        #### DEFAULT VALUES ####
+        self.tick_len: int = 200
+        self.seek_lag: int = 0
+        self.track_len: int = 0
+        self.track_idx: int = 0
+        self.starting_volume: int = 100
 
+        self.sizes = Sizes()
+        self.status = Status()
+
+        #### MAIN SETUP ####
         self.root = root
         self.root.title("Music Player")
-
-        ## LOAD ICONS
-        self.icons = dict()
-        p,s,xs,col = (75, 30, 20, 'g')
-        t_ic = {'play':p, 'pause':p, 'next':s, 'prev':s, 'vol':xs}
-        for k,v in t_ic.items():
-            if (path := pl.Path('assets/img')/f"{k}_{col}.png").exists():
-                ico = Image.open(path)
-                ico = ico.resize((v,v))
-                ico_pi = itk.PhotoImage(ico)
-                self.icons.update({k: ico_pi})
-                print(ico_pi)
-        print(self.icons)
-
-        ## LOAD THEME
-        root.tk.call('source', 'assets/forest-dark.tcl')
-        ttk.Style().theme_use('forest-dark')
-
         self.root.minsize(width=350, height=510)
         self.root.bind("<Configure>", self.on_config)
         self.root.update()
 
-        ## LOAD VLC PLAYER
+        # vlc player
         self.instance = vlc.Instance()
         self.player = self.instance.media_player_new()
-        
-        ## LOAD DATAFRAME
+
+        # windows controls (TODO: adjust for mac/linux)
+        self.win = WinMedia()
+        self.win.events.add_play_received(self.play_pause)
+        # self.win.events.add_pause_received(self.play_pause)
+        # self.win.events.add_next_received(self.next_song)
+        # self.win.events.add_previous_received(self.prev_song)
+
+        # data
         self.lib = lib
         self.df = self.lib.tracks_df
-        self.curr_track_idx = 0
 
-        ## FRAMES
+        #### THEME / AESTHETICS ####
+        root.tk.call('source', 'assets/forest-dark.tcl')
+        ttk.Style().theme_use('forest-dark')
+        
+        # load icons
+        col = 'g' if self.lib.prefs.aes.theme == 'forest_dark' else 'b'
+        self.icons = Icons()
+        for i in self.icons.__dict__.keys():
+            if (path := pl.Path('assets/img')/f"{i}_{col}.png").exists():
+                size = self.sizes.s
+                if i in ['play', 'pause']: size = self.sizes.m
+                elif i in ['vol']: size = self.sizes.xs
+                self.icons.__dict__[i] = itk.PhotoImage(Image.open(path).resize((size,size)))
+        
+        #### LAYOUT ####
         self.f_main = ttk.Frame(self.root)
         self.f_top = ttk.Frame(self.f_main) # top controls
         self.f_bottom = ttk.Frame(self.f_main) # main content
@@ -69,31 +142,24 @@ class MusicPlayer:
         self.f_timer = ttk.Frame(self.f_ctrl) # time slider
         self.f_info = ttk.Frame(self.f_ctrl) # current track info
 
-        self.f_list = ttk.Frame(self.f_bottom) # List of tracks
-
-        ##ICONS
-        self.i_play = self.icons['play']
-        self.i_pause = self.icons['pause']
-        self.i_next = self.icons['next']
-        self.i_prev = self.icons['prev']
-        self.i_vol = self.icons['vol']
+        self.f_list = ttk.Frame(self.f_bottom) # list of tracks
         
-        ### WIDGETS
-        # CANVAS
-        self.canvas_size = 250
+        ## Widgets ##
+        # Canvas
+        self.canvas_size = self.lib.prefs.aes.img_size
         self.picture = tk.Canvas(self.f_ctrl, width=self.canvas_size, height=self.canvas_size,
                                  relief="raised", borderwidth=3)
 
         self.picture.grid(row=0, column=0, columnspan=3, pady=10)
 
-        # TRACK INFO
+        # Track info
         self.track_title_label = tk.Label(self.f_info, text="", anchor='w')
         self.track_artist_label = tk.Label(self.f_info, text="", anchor='w')
 
         self.track_title_label.pack(side=tk.TOP)
         self.track_artist_label.pack(side=tk.TOP)
 
-        # TRACK TIMER
+        # Track Timer
         self.last_time = 0
         self.time = tk.DoubleVar()
 
@@ -108,36 +174,36 @@ class MusicPlayer:
         self.time_end.pack(side=tk.RIGHT, padx=5)
         self.time_slider.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        ## SONG LIST
+        # Song List
         self.fill_all_artists(self.f_list)
 
-        ### BUTTONS WITH ICONS
-        ## Volume
+        # Buttons
+        # volume
         self.volume = tk.IntVar()
-        self.volume_label = tk.Label(self.f_top, image=self.i_vol)
+        self.volume_label = tk.Label(self.f_top, image=self.icons.vol)
         self.volume_scale = ttk.Scale(self.f_top, variable=self.volume, from_=0, to=100,
                                       orient=tk.HORIZONTAL, command=self.on_volume)
-        self.volume_scale.set(50)
+        self.volume_scale.set(self.starting_volume)
 
         self.volume_scale.pack(side=tk.RIGHT, padx=5)
         self.volume_label.pack(side=tk.RIGHT)
         
-        # Track Control Button
-        self.play_pause_button = tk.Button(self.f_ctrl, image=self.i_play, command=self.play_pause,
-                                           width=p, height=p, borderwidth=0, relief=tk.FLAT,
+        # track control buttons
+        self.play_pause_button = tk.Button(self.f_ctrl, image=self.icons.play, command=self.play_pause,
+                                           width=self.sizes.m, height=self.sizes.m, borderwidth=0, relief=tk.FLAT,
                                            activebackground="#323232")
-        self.prev_button = tk.Button(self.f_ctrl, image=self.i_prev, command=self.prev_song,
-                                     width=s, height=s, borderwidth=0, relief=tk.FLAT,
+        self.prev_button = tk.Button(self.f_ctrl, image=self.icons.prev, command=self.prev_song,
+                                     width=self.sizes.s, height=self.sizes.s, borderwidth=0, relief=tk.FLAT,
                                      activebackground="#323232")
-        self.next_button = tk.Button(self.f_ctrl, image=self.i_next, command=self.next_song,
-                                     width=s, height=s, borderwidth=0, relief=tk.FLAT,
+        self.next_button = tk.Button(self.f_ctrl, image=self.icons.next, command=self.next_song,
+                                     width=self.sizes.s, height=self.sizes.s, borderwidth=0, relief=tk.FLAT,
                                      activebackground="#323232")
         
         self.prev_button.grid(row=3, column=0, sticky='e')
         self.play_pause_button.grid(row=3, column=1, pady=10, sticky='ew')
         self.next_button.grid(row=3, column=2, sticky='w')
 
-        ## PACK FRAMES
+        ## Pack Frames ##
         self.f_main.pack(fill=tk.BOTH, expand=True)
         self.f_top.grid(row=0, column=0, sticky='ew', padx=10, pady=10)
         self.f_bottom.grid(row=1, column=0, sticky='ew')
@@ -148,7 +214,16 @@ class MusicPlayer:
         self.f_ctrl.pack(side=tk.RIGHT, fill=tk.X, pady=10, padx=20, expand=True)
         self.f_list.pack(side=tk.LEFT, expand=True, fill=tk.BOTH, padx=10, pady=20)
 
+        #### TICK ####
         self.tick()
+
+        #### KEYBIND TESTING ####
+        self.root.bind("<XF86AudioPlay>", self.play_pause_press)
+
+    def play_pause_press(self, event):
+        self.play_pause()
+        self.win.setup(record=self.df.iloc[self.track_idx])
+        print(asyncio.run(self.win.get_media_info()))
     
     def load_album_image(self, image):
         self.album_image = itk.PhotoImage(image)
@@ -191,48 +266,56 @@ class MusicPlayer:
         selected_index = int(self.treeview.focus())
         print(selected_index)
         if selected_index != None:
-            self.curr_track_idx = selected_index
+            self.track_idx = selected_index
             self.setup_track()
             self.play()
     
     def play_pause(self):
-        self.playing = not self.playing
-        if self.playing == False:
+        self.status.playing = not self.status.playing
+        if self.status.playing == False:
             self.pause()
-            self.play_pause_button.config(image=self.i_play)
+            self.play_pause_button.config(image=self.icons.play)
         else:
             self.play()
-            self.play_pause_button.config(image=self.i_pause)
+            self.play_pause_button.config(image=self.icons.pause)
 
     def setup_track(self):
-        track_path = self.df.iloc[self.curr_track_idx]["path"]
+        track = self.df.iloc[self.track_idx]
+        self.media_display_info = {
+            "AlbumArtist": track['albumartist'],
+            "AlbumTitle": track['album'],
+            "AlbumTrackCount": track['tracknumber'],
+            "Title": track["title"],
+            "Artist": track["artist"]
+        }
+        track_path = track["path"]
         media = self.instance.media_new(track_path)
         self.player.set_media(media)
         self.reset_slider()
         self.track_len = self.player.get_length()
         self.player.play()
 
-        title = self.df.iloc[self.curr_track_idx]["title"]
-        artists = self.df.iloc[self.curr_track_idx]["artist"]
-        image = self.df.iloc[self.curr_track_idx]["image"]
+        title = track["title"]
+        artists = track["artist"]
+        image = track["image"]
         self.update_track_info(title, artists)
         self.load_album_image(image)
 
     def play(self):
-        if self.stopped: self.setup_track()
+        if self.status.stopped: self.setup_track()
         else: self.player.play()
-        self.stopped = False
+        self.status.stopped = False
     
     def pause(self):
         self.player.pause()
 
     def stop(self):
         self.player.stop()
-        if self.playing == True:
-            self.play_pause_button.config(image=self.i_play)
-            self.playing = False
+        if self.status.playing == True:
+            self.play_pause_button.config(image=self.icons.play)
+            self.status.playing = False
         self.reset_slider()
-        self.stopped = True
+        self.status.stopped = True
 
     def reset(self):
         self.player.set_time(0)
@@ -244,12 +327,12 @@ class MusicPlayer:
 
     def next_song(self):
         self.stop()
-        self.curr_track_idx = (self.curr_track_idx + 1) % len(self.df)
+        self.track_idx = (self.track_idx + 1) % len(self.df)
         self.play()
 
     def prev_song(self):
         self.stop()
-        self.curr_track_idx = (self.curr_track_idx - 1) % len(self.df)
+        self.track_idx = (self.track_idx - 1) % len(self.df)
         self.play()
 
     def on_volume(self, vol):
@@ -270,8 +353,8 @@ class MusicPlayer:
             t = self.player.get_time()
             m2, r2 = divmod(max(t,0), 60000)
             self.time_start.config(text="{:02d}:{:02d}".format(m2,r2//1000))
-            if self.seeking == False:
-                self.seeking = True
+            if self.status.seeking == False:
+                self.status.seeking = True
                 self.check_seeking()
     
     def check_seeking(self):
@@ -280,7 +363,7 @@ class MusicPlayer:
             self.time_start.config(text="{:02d}:{:02d}".format(m2,r2//1000))
             self.root.after(max(10,self.tick_len/100), self.check_seeking)
         else:
-            self.seeking = False
+            self.status.seeking = False
             t = self.time.get()
             self.player.set_time(int(t))
             self.player.play()
@@ -298,7 +381,7 @@ class MusicPlayer:
                     m2, r2 = divmod(self.player.get_time(), 60000)
                     self.time_start.config(text="{:02d}:{:02d}".format(m2,r2//1000))
                     self.last_time = t
-                elif (self.track_len - self.player.get_time()) <= self.tick_len and not self.player.is_playing() and not self.stopped:
+                elif (self.track_len - self.player.get_time()) <= self.tick_len and not self.player.is_playing() and not self.status.stopped:
                     self.time_start.config(text="{:02d}:{:02d}".format(m,r//1000))
                     self.next_song()
         self.root.after(self.tick_len, self.tick)

@@ -1,5 +1,16 @@
 {
-    "music_directories": ["~/Music"],
-    "extensions": [".mp3", ".mp4", ".wav"],
-    "theme": "forest-dark"
+    "load": {
+        "music_directories": ["~/Music"],
+        "extensions": [".mp3", ".mp4", ".wav"]
+    },
+    "aes": {
+        "theme": "forest-dark",
+        "img_size": 250
+    },
+    "correct": {
+        "slash_artists": ["AC/DC"]
+    },
+    "keybinds": {
+        "MusicPlayPause": "xf86audioplay"
+    }
 }
