@@ -4,8 +4,11 @@ import pandas as pd
 import pathlib as pl
 from PIL import Image
 from PIL import ImageTk as itk
+import winsdk.windows.foundation
+import winsdk.windows.foundation.collections
 import winsdk.windows.media
 import winsdk.windows.media.control
+import winsdk.windows.media.core
 import winsdk.windows.media.playback
 import data_processing as data
 from dataclasses import dataclass
@@ -48,13 +51,8 @@ class Icons:
 
 class WinMedia:
     def __init__(self) -> None:
-        self.media_player = winsdk.windows.media.playback.MediaPlayer()
-        self.events = self.media_player.command_manager
-
-        # self.controls = winsdk.windows.media.SystemMediaTransportControls
         self.manager = winsdk.windows.media.control.GlobalSystemMediaTransportControlsSessionManager
-        # self.display_updater = winsdk.windows.media.SystemMediaTransportControlsDisplayUpdater
-        # self.display_properties = winsdk.windows.media.MusicDisplayProperties
+    
     async def get_media_info(self):
         sessions = await self.manager.request_async()
         current_session = sessions.get_current_session()
@@ -66,24 +64,18 @@ class WinMedia:
         return None
 
     def setup(self, record):
-
-    def update(self, title, albumartist):
         try:
-            print(0)
-            self.media_item = winsdk.windows.media.playback.MediaPlaybackItem(None, 0)
-            print(1)
-            self.props = self.media_item.get_display_properties()
-            print(2)
-            self.props.type = winsdk.windows.media.MediaPlaybackType.MUSIC
-            print(3)
-            self.props.music_properties.title = "test"
-            print(4)
-            self.props.music_properties.album_artist = "test"
-            print(5)
-            self.media_item.apply_display_properties(self.props)
-            print(6)
-        except Exception as e:
-            log.warning(e)
+            WM_APPCOMMAND = 0x0319
+            APPCOMMAND_MEDIA_PLAY_PAUSE = 14
+            APPCOMMAND_MEDIA_NEXTTRACK = 11
+            APPCOMMAND_MEDIA_PREVIOUSTRACK = 12
+            ctypes.windll.user32.PostMessageW(
+                ctypes.windll.user32.GetForegroundWindow(),
+                WM_APPCOMMAND,
+                0,
+                APPCOMMAND_MEDIA_PLAY_PAUSE * 65536
+            )
+        except Exception as e: log.warning(e)
 
 class MusicPlayer:
     def __init__(self, root: tk.Tk, lib: data.Library):
@@ -91,7 +83,7 @@ class MusicPlayer:
         self.tick_len: int = 200
         self.seek_lag: int = 0
         self.track_len: int = 0
-        self.track_idx: int = 0
+        self.track_idx: int = 74
         self.starting_volume: int = 100
 
         self.sizes = Sizes()
@@ -110,11 +102,7 @@ class MusicPlayer:
 
         # windows controls (TODO: adjust for mac/linux)
         self.win = WinMedia()
-        self.win.events.add_play_received(self.play_pause)
-        # self.win.events.add_pause_received(self.play_pause)
-        # self.win.events.add_next_received(self.next_song)
-        # self.win.events.add_previous_received(self.prev_song)
-
+        
         # data
         self.lib = lib
         self.df = self.lib.tracks_df
@@ -217,13 +205,18 @@ class MusicPlayer:
         #### TICK ####
         self.tick()
 
-        #### KEYBIND TESTING ####
+        #### KEYBINDS ####
+        # TODO: use keybinds in preferences
         self.root.bind("<XF86AudioPlay>", self.play_pause_press)
+        self.root.bind("<Right>", self.next_press)
+        self.root.bind("<Left>", self.prev_press)
 
-    def play_pause_press(self, event):
+    def play_pause_press(self, _):
         self.play_pause()
-        self.win.setup(record=self.df.iloc[self.track_idx])
-        print(asyncio.run(self.win.get_media_info()))
+    def next_press(self, _):
+        self.next_song()
+    def prev_press(self, _):
+        self.prev_song()
     
     def load_album_image(self, image):
         self.album_image = itk.PhotoImage(image)
@@ -232,6 +225,19 @@ class MusicPlayer:
 
     def fill_albums(self, frame: ttk.Frame):
         pass
+            
+    def change_select(self, event):
+        if isinstance(event, tk.Event):
+            cmd = "prev" if event.keysym == "Up" else "next"
+        else:
+            cmd = event
+        print(cmd, event, isinstance(event, tk.Event))
+        length = len(self.treeview.get_children())
+        self.tree_select = (self.tree_select + (1,-1)[cmd=="prev"])%length
+        self.treeview.selection_set(self.tree_select)
+        self.treeview.focus(self.treeview.get_children()[self.tree_select])
+        self.treeview.see(self.treeview.focus())
+
     def fill_all_artists(self, frame: ttk.Frame):
         self.scrollbar = ttk.Scrollbar(frame)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -258,16 +264,20 @@ class MusicPlayer:
             self.treeview.insert('', index="end", iid=i, text=item.title, values=[artist, album, tracknumber])
 
         # Select and scroll
-        self.treeview.selection_set(0)
-        self.treeview.bind('<Double-1>', self.on_double_click)
+        self.tree_select = self.track_idx
+        self.treeview.selection_set(self.tree_select)
+        self.treeview.focus(self.tree_select)
+        self.treeview.see(self.treeview.focus())
+        self.root.bind('<Double-1>', self.play_selection)
+        self.root.bind('<Return>', self.play_selection)
+        self.root.bind('<Up>', self.change_select)
+        self.root.bind('<Down>', self.change_select)
 
-    def on_double_click(self, e):
+    def play_selection(self, e):
         self.stop()
         selected_index = int(self.treeview.focus())
-        print(selected_index)
         if selected_index != None:
             self.track_idx = selected_index
-            self.setup_track()
             self.play()
     
     def play_pause(self):
@@ -329,11 +339,13 @@ class MusicPlayer:
         self.stop()
         self.track_idx = (self.track_idx + 1) % len(self.df)
         self.play()
+        self.change_select('next')
 
     def prev_song(self):
         self.stop()
         self.track_idx = (self.track_idx - 1) % len(self.df)
         self.play()
+        self.change_select('prev')
 
     def on_volume(self, vol):
         self.player.audio_set_volume(round(float(vol)))
