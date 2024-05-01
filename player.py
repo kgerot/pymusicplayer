@@ -80,7 +80,7 @@ class WinMedia:
 class MusicPlayer:
     def __init__(self, root: tk.Tk, lib: data.Library):
         #### DEFAULT VALUES ####
-        self.tick_len: int = 200
+        self.tick_len: int = 100
         self.seek_lag: int = 0
         self.track_len: int = 0
         self.track_idx: int = 74
@@ -231,7 +231,6 @@ class MusicPlayer:
             cmd = "prev" if event.keysym == "Up" else "next"
         else:
             cmd = event
-        print(cmd, event, isinstance(event, tk.Event))
         length = len(self.treeview.get_children())
         self.tree_select = (self.tree_select + (1,-1)[cmd=="prev"])%length
         self.treeview.selection_set(self.tree_select)
