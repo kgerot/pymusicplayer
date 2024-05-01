@@ -118,7 +118,7 @@ class MusicPlayer:
             if (path := pl.Path('assets/img')/f"{i}_{col}.png").exists():
                 size = self.sizes.s
                 if i in ['play', 'pause']: size = self.sizes.m
-                elif i in ['vol']: size = self.sizes.xs
+                elif i in ['vol', 'eq']: size = self.sizes.xs
                 self.icons.__dict__[i] = itk.PhotoImage(Image.open(path).resize((size,size)))
         
         #### LAYOUT ####
