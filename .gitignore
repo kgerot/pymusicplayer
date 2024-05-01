@@ -15,7 +15,7 @@ assets/img/*.png
 !assets/img/prev_[gb].png
 !assets/img/vol_[gb].png
 !assets/img/eq_[gb].png
-!assets/img/close_[gb].png
+!assets/img/x_[gb].png
 
 # exclude light mode for now
 assets/forest-light*

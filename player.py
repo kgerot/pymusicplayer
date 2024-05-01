@@ -48,6 +48,8 @@ class Icons:
     next: itk.PhotoImage = None
     prev: itk.PhotoImage = None
     vol: itk.PhotoImage = None
+    eq: itk.PhotoImage = None
+    x: itk.PhotoImage = None
 
 class WinMedia:
     def __init__(self) -> None:
@@ -89,12 +91,7 @@ class MusicPlayer:
         self.sizes = Sizes()
         self.status = Status()
 
-        #### MAIN SETUP ####
-        self.root = root
-        self.root.title("Music Player")
-        self.root.minsize(width=350, height=510)
-        self.root.bind("<Configure>", self.on_config)
-        self.root.update()
+        #### SETUP ####
 
         # vlc player
         self.instance = vlc.Instance()
@@ -118,10 +115,20 @@ class MusicPlayer:
             if (path := pl.Path('assets/img')/f"{i}_{col}.png").exists():
                 size = self.sizes.s
                 if i in ['play', 'pause']: size = self.sizes.m
-                elif i in ['vol', 'eq']: size = self.sizes.xs
+                elif i in ['vol', 'x']: size = self.sizes.xs
                 self.icons.__dict__[i] = itk.PhotoImage(Image.open(path).resize((size,size)))
         
         #### LAYOUT ####
+        self.root = root
+        self.title = "Music Player"
+        self.construct_window()
+        self.root.title(self.title)
+        self.root.minsize(width=350, height=510)
+        self.root.geometry("+{0}+{1}".format(100, 100)) # TODO: responsive
+        self.root.bind("<Configure>", self.on_config)
+        self.root.update()
+
+        # Frames
         self.f_main = ttk.Frame(self.root)
         self.f_top = ttk.Frame(self.f_main) # top controls
         self.f_bottom = ttk.Frame(self.f_main) # main content
@@ -175,6 +182,12 @@ class MusicPlayer:
 
         self.volume_scale.pack(side=tk.RIGHT, padx=5)
         self.volume_label.pack(side=tk.RIGHT)
+
+        # equalizer launch
+        self.eq_button = tk.Button(self.f_top, image=self.icons.eq, command=self.launch_eq,
+                                           width=self.sizes.s, height=self.sizes.s, borderwidth=0, relief=tk.FLAT,
+                                           activebackground="#323232")
+        self.eq_button.pack(side=tk.LEFT, padx=10)
         
         # track control buttons
         self.play_pause_button = tk.Button(self.f_ctrl, image=self.icons.play, command=self.play_pause,
@@ -186,6 +199,7 @@ class MusicPlayer:
         self.next_button = tk.Button(self.f_ctrl, image=self.icons.next, command=self.next_song,
                                      width=self.sizes.s, height=self.sizes.s, borderwidth=0, relief=tk.FLAT,
                                      activebackground="#323232")
+                                     
         
         self.prev_button.grid(row=3, column=0, sticky='e')
         self.play_pause_button.grid(row=3, column=1, pady=10, sticky='ew')
@@ -211,11 +225,34 @@ class MusicPlayer:
         self.root.bind("<Right>", self.next_press)
         self.root.bind("<Left>", self.prev_press)
 
-    def play_pause_press(self, _):
+    def construct_window(self):
+        self.root.overrideredirect(True)
+        self.title_bar = tk.Frame(self.root, bg='#454545', relief='raised', bd=2)
+        tk.Button(self.title_bar, image=self.icons.x, command=self.quit, width=self.sizes.xs, height=self.sizes.s,
+                  borderwidth=0, relief=tk.FLAT, activebackground="#323232", bg="#454545").pack(side=tk.RIGHT, padx=10)
+        tk.Label(self.title_bar, text=self.title, bg="#454545").pack(side=tk.LEFT, padx=10)
+        self.title_bar.pack(expand=1, fill=tk.X)
+        self.title_bar.bind('<Button-1>', self.move_window)
+
+    def move_window(self, event: tk.Event):
+        ywin = self.root.winfo_y() - event.y_root
+        xwin = self.root.winfo_x() - event.x_root
+        geo = self.root.geometry().split("+")[0]
+        def _move_window(event: tk.Event):
+            self.root.geometry(geo+'+{0}+{1}'.format(event.x_root+xwin, event.y_root+ywin))
+        self.title_bar.bind('<B1-Motion>', _move_window)
+    
+    def quit(self):
+        self.root.quit()
+
+    def launch_eq(self):
+        print("launch")
+    
+    def play_pause_press(self, event: tk.Event):
         self.play_pause()
-    def next_press(self, _):
+    def next_press(self, event: tk.Event):
         self.next_song()
-    def prev_press(self, _):
+    def prev_press(self, event: tk.Event):
         self.prev_song()
     
     def load_album_image(self, image):
@@ -267,7 +304,7 @@ class MusicPlayer:
         self.treeview.selection_set(self.tree_select)
         self.treeview.focus(self.tree_select)
         self.treeview.see(self.treeview.focus())
-        self.root.bind('<Double-1>', self.play_selection)
+        self.treeview.bind('<Double-1>', self.play_selection)
         self.root.bind('<Return>', self.play_selection)
         self.root.bind('<Up>', self.change_select)
         self.root.bind('<Down>', self.change_select)
