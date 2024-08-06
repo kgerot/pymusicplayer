@@ -94,15 +94,15 @@ class MusicPlayer:
         #### SETUP ####
 
         # vlc player
-        self.instance = vlc.Instance()
-        self.player = self.instance.media_player_new()
+        self.instance: vlc.Instance = vlc.Instance()
+        self.player: vlc.MediaPlayer = self.instance.media_player_new()
 
         # windows controls (TODO: adjust for mac/linux)
         self.win = WinMedia()
         
         # data
         self.lib = lib
-        self.df = self.lib.tracks_df
+        self.df: pd.DataFrame = self.lib.tracks_df
 
         #### THEME / AESTHETICS ####
         root.tk.call('source', 'assets/forest-dark.tcl')
